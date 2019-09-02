@@ -13,6 +13,7 @@ struct Bitmap {
 // Windows Desktop Duplication API
 class WinDesktopDup {
 public:
+	bool forceUpdateAll;
 	Bitmap Latest;
 	int    OutputNumber = 0;
 
@@ -31,3 +32,9 @@ private:
 };
 
 void SendNBytes(const void* buf, int n);
+
+class FrameUpdateData {
+public:
+	std::vector<uint8_t> header;
+	std::vector<uint8_t> metaData;
+};
