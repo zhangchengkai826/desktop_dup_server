@@ -171,8 +171,15 @@ void WinDesktopDup::CaptureNext() {
 		OutputDebugStringA(tsf::fmt("Resize Latest Bitmap to (%d, %d)\n", Latest.Width, Latest.Height).c_str());
 	}
 
+	BYTE ctrlStruct = 0;
+	if (frameInfo.LastPresentTime.QuadPart != 0)
+		ctrlStruct |= 0x1;
+	if (frameInfo.LastMouseUpdateTime.QuadPart != 0)
+		ctrlStruct |= 0x2;
+	SendNBytes(&ctrlStruct, sizeof(ctrlStruct));
+
 	// the desktop image was updated
-	if (frameInfo.LastPresentTime.QuadPart != 0) {
+	if (ctrlStruct & 0x1) {
 		// image already in system memory
 		if (deskDuplDesc.DesktopImageInSystemMemory) {
 			DXGI_MAPPED_RECT mappedRect;
