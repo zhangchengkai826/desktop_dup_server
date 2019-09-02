@@ -132,6 +132,7 @@ void WinDesktopDup::CaptureNext() {
 	DXGI_OUTDUPL_FRAME_INFO frameInfo;
 	hr = DeskDupl->AcquireNextFrame(0, &frameInfo, &deskRes);
 	if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+		OutputDebugStringA("Nothing changed, happy\n");
 		// nothing changed, happy
 		return;
 	}
