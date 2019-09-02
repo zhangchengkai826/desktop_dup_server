@@ -161,8 +161,7 @@ void WinDesktopDup::CaptureNext() {
 
 	DXGI_OUTDUPL_DESC deskDuplDesc;
 	DeskDupl->GetDesc(&deskDuplDesc);
-	if (deskDuplDesc.ModeDesc.Width != 2736 || deskDuplDesc.ModeDesc.Height != 1824)
-	//if (deskDuplDesc.ModeDesc.Width != 1920 || deskDuplDesc.ModeDesc.Height != 1080)
+	if (deskDuplDesc.ModeDesc.Width != 1920 || deskDuplDesc.ModeDesc.Height != 1080)
 		throw std::runtime_error("NotImplementError: Currently only support server resolution 1920x1080");
 	if (Latest.Width != deskDuplDesc.ModeDesc.Width || Latest.Height != deskDuplDesc.ModeDesc.Height) {
 		Latest.Width = deskDuplDesc.ModeDesc.Width;
