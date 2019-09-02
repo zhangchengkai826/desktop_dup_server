@@ -173,72 +173,69 @@ void WinDesktopDup::CaptureNext() {
 
 	FrameUpdateData fud;
 
-	UINT metaSize = 0;
+	bool sendBaseImage = false;
+	if (forceUpdateAll) {
+		sendBaseImage = true;
+		forceUpdateAll = false;
+	}
 
 	UINT numDirtyRects = 0;
 	RECT* dirtyRects = nullptr;
 
 	// the desktop image was updated
-	if (frameInfo.LastPresentTime.QuadPart != 0) {
-		// prepare meta data
-		bool updateAll = false;
-		if (forceUpdateAll) {
-			updateAll = true;
-			forceUpdateAll = false;
+	if (!sendBaseImage && frameInfo.LastPresentTime.QuadPart != 0 && frameInfo.TotalMetadataBufferSize) {
+		fud.metaData.resize((ULONGLONG)frameInfo.TotalMetadataBufferSize + 2);
+
+		UINT szMoveRects;
+		hr = DeskDupl->GetFrameMoveRects((UINT)fud.metaData.size(), (DXGI_OUTDUPL_MOVE_RECT*)(fud.metaData.data() + 1), &szMoveRects);
+		if (hr == DXGI_ERROR_ACCESS_LOST) {
+			Reset();
+			return;
 		}
-		if (!updateAll && frameInfo.TotalMetadataBufferSize) {
-			fud.metaData.resize((ULONGLONG)frameInfo.TotalMetadataBufferSize + 2);
-
-			UINT szMoveRects;
-			hr = DeskDupl->GetFrameMoveRects((UINT)fud.metaData.size(), (DXGI_OUTDUPL_MOVE_RECT*)(fud.metaData.data() + 1), &szMoveRects);
-			if (hr == DXGI_ERROR_ACCESS_LOST) {
-				Reset();
-				return;
-			}
-			else if (FAILED(hr)) {
-				throw std::runtime_error(tsf::fmt("GetFrameMoveRects error, code: %d\n", hr));
-			}
-
-			auto numMoveRects = szMoveRects / sizeof(DXGI_OUTDUPL_MOVE_RECT);
-			if (numMoveRects > UINT8_MAX) {
-				updateAll = true;
-			}
-			fud.metaData[0] = (UINT8)numMoveRects;
-
-			UINT szDirtyRects;
-			hr = DeskDupl->GetFrameDirtyRects((UINT)fud.metaData.size() - szMoveRects - 2, (RECT*)(fud.metaData.data() + 2 + szMoveRects), &szDirtyRects);
-			if (hr == DXGI_ERROR_ACCESS_LOST) {
-				Reset();
-				return;
-			}
-			else if (FAILED(hr)) {
-				throw std::runtime_error(tsf::fmt("GetFrameDirtyRects error, code: %d\n", hr));
-			}
-
-			numDirtyRects = szDirtyRects / sizeof(RECT);
-			if (numDirtyRects > UINT8_MAX) {
-				updateAll = true;
-			}
-			fud.metaData[1ull + szMoveRects] = (UINT8)numDirtyRects;
-			dirtyRects = (RECT*)(fud.metaData.data() + 2 + szMoveRects);
-		}
-		if (updateAll) {
-			fud.metaData.resize(2 + sizeof(RECT));
-			fud.metaData[0] = 0;
-			fud.metaData[1] = 1;
-			RECT fullRect;
-			fullRect.top = 0;
-			fullRect.left = 0;
-			fullRect.right = Latest.Width;
-			fullRect.bottom = Latest.Height;
-			memcpy(fud.metaData.data() + 2, &fullRect, sizeof(fullRect));
-			
-			numDirtyRects = 1;
-			dirtyRects = (RECT *)(fud.metaData.data() + 2);
+		else if (FAILED(hr)) {
+			throw std::runtime_error(tsf::fmt("GetFrameMoveRects error, code: %d\n", hr));
 		}
 
-		metaSize = (UINT)fud.metaData.size();
+		auto numMoveRects = szMoveRects / sizeof(DXGI_OUTDUPL_MOVE_RECT);
+		if (numMoveRects > UINT8_MAX) {
+			sendBaseImage = true;
+		}
+		fud.metaData[0] = (UINT8)numMoveRects;
+
+		UINT szDirtyRects;
+		hr = DeskDupl->GetFrameDirtyRects((UINT)fud.metaData.size() - szMoveRects - 2, (RECT*)(fud.metaData.data() + 2 + szMoveRects), &szDirtyRects);
+		if (hr == DXGI_ERROR_ACCESS_LOST) {
+			Reset();
+			return;
+		}
+		else if (FAILED(hr)) {
+			throw std::runtime_error(tsf::fmt("GetFrameDirtyRects error, code: %d\n", hr));
+		}
+
+		numDirtyRects = szDirtyRects / sizeof(RECT);
+		if (numDirtyRects > UINT8_MAX) {
+			sendBaseImage = true;
+		}
+		fud.metaData[1ull + szMoveRects] = (UINT8)numDirtyRects;
+		dirtyRects = (RECT*)(fud.metaData.data() + 2 + szMoveRects);
 	}
+
+	if (sendBaseImage) {
+		fud.metaData.resize(2 + sizeof(RECT));
+		fud.metaData[0] = 0;
+		fud.metaData[1] = 1;
+		RECT fullRect;
+		fullRect.top = 0;
+		fullRect.left = 0;
+		fullRect.right = Latest.Width;
+		fullRect.bottom = Latest.Height;
+		memcpy(fud.metaData.data() + 2, &fullRect, sizeof(fullRect));
+
+		numDirtyRects = 1;
+		dirtyRects = (RECT*)(fud.metaData.data() + 2);
+	}
+
+	auto metaSize = (UINT)fud.metaData.size();
 
 	// send header
 	fud.header.resize(sizeof(metaSize));
@@ -269,7 +266,7 @@ void WinDesktopDup::CaptureNext() {
 				for (int y = 0; y < h; y++)
 					memcpy(Latest.Buf.data() + ((LONGLONG)y * w * 4), (uint8_t*)mappedRect.pBits + (long long)mappedRect.Pitch * ((LONGLONG)y + r.top), (LONGLONG)w * 4);
 
-				SendNBytes(Latest.Buf.data(), (int)Latest.Buf.size());
+				SendNBytes(Latest.Buf.data(), w * h * 4);
 			}
 
 			hr = DeskDupl->UnMapDesktopSurface();
@@ -315,7 +312,7 @@ void WinDesktopDup::CaptureNext() {
 					for (int y = 0; y < h; y++)
 						memcpy(Latest.Buf.data() + ((LONGLONG)y * w * 4), (uint8_t*)sr.pData + (long long)sr.RowPitch * ((LONGLONG)y + r.top), (LONGLONG)w * 4);
 
-					SendNBytes(Latest.Buf.data(), (int)Latest.Buf.size());
+					SendNBytes(Latest.Buf.data(), w * h * 4);
 				}
 				D3DDeviceContext->Unmap(cpuTex, 0);
 			}
