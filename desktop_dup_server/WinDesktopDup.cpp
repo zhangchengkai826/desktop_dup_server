@@ -174,8 +174,10 @@ void WinDesktopDup::CaptureNext() {
 	BYTE ctrlStruct = 0;
 	if (frameInfo.LastPresentTime.QuadPart != 0)
 		ctrlStruct |= 0x1;
-	if (frameInfo.LastMouseUpdateTime.QuadPart != 0)
+	if (frameInfo.LastMouseUpdateTime.QuadPart != 0 && frameInfo.PointerPosition.Visible)
 		ctrlStruct |= 0x2;
+	if (frameInfo.PointerShapeBufferSize != 0)
+		ctrlStruct |= 0x4;
 	SendNBytes(&ctrlStruct, sizeof(ctrlStruct));
 
 	// the desktop image was updated
@@ -240,5 +242,22 @@ void WinDesktopDup::CaptureNext() {
 			cpuTex->Release();
 		}
 		SendNBytes(Latest.Buf.data(), (int)Latest.Buf.size());
+	}
+	if (ctrlStruct & 0x2) {
+		const auto &pos = frameInfo.PointerPosition.Position;
+		SendNBytes(&pos, sizeof(pos));
+	}
+	if (ctrlStruct & 0x4) {
+		std::vector<BYTE> rawData(frameInfo.PointerShapeBufferSize);
+		UINT pointerShapeBufferSize;
+		DXGI_OUTDUPL_POINTER_SHAPE_INFO pointerInfo;
+		DeskDupl->GetFramePointerShape((UINT)rawData.size(), rawData.data(), &pointerShapeBufferSize, &pointerInfo);
+		
+		if(pointerShapeBufferSize != (int)rawData.size())
+			throw std::runtime_error(tsf::fmt("unexpected error\n", hr));
+
+		SendNBytes(&pointerShapeBufferSize, sizeof(pointerShapeBufferSize));
+		SendNBytes(rawData.data(), (int)rawData.size());
+		SendNBytes(&pointerInfo, sizeof(pointerInfo));
 	}
 }
