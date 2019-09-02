@@ -20,7 +20,7 @@ public:
 
 	Error Initialize();
 	void  Close();
-	bool  CaptureNext();
+	void  CaptureNext();
 
 private:
 	ID3D11Device*           D3DDevice        = nullptr;
@@ -29,3 +29,5 @@ private:
 	DXGI_OUTPUT_DESC        OutputDesc;
 	bool                    HaveFrameLock = false;
 };
+
+void SendNBytes(const void* buf, int n);
