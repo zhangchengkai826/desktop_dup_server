@@ -21,6 +21,7 @@ public:
 	Error Initialize();
 	void  Close();
 	void  CaptureNext();
+	void Reset();
 
 private:
 	ID3D11Device*           D3DDevice        = nullptr;

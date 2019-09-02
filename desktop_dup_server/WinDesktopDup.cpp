@@ -111,6 +111,16 @@ void WinDesktopDup::Close() {
 	HaveFrameLock    = false;
 }
 
+void WinDesktopDup::Reset() {
+	OutputDebugStringA("LOST IDXGIOutputDuplication, resetting...");
+	// shutdown and reinitialize
+	Close();
+	auto err = Initialize();
+	if (err != "") {
+		throw std::runtime_error(err);
+	}
+}
+
 void WinDesktopDup::CaptureNext() {
 	if (!DeskDupl)
 		return;
@@ -123,7 +133,13 @@ void WinDesktopDup::CaptureNext() {
 	if (HaveFrameLock) {
 		HaveFrameLock = false;
 		hr = DeskDupl->ReleaseFrame();
-		// ignore response
+		if (hr == DXGI_ERROR_ACCESS_LOST) {
+			Reset();
+			return;
+		}
+		else if (FAILED(hr)) {
+			throw std::runtime_error(tsf::fmt("ReleaseFrame error, code: %d\n", hr));
+		}
 	}
 
 	IDXGIResource *deskRes = nullptr;
@@ -131,68 +147,92 @@ void WinDesktopDup::CaptureNext() {
 	hr = DeskDupl->AcquireNextFrame(0, &frameInfo, &deskRes);
 	if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
 		OutputDebugStringA("Nothing changed, happy\n");
-		// nothing changed, happy
 		return;
 	}
-	if (FAILED(hr)) {
-		OutputDebugStringA(tsf::fmt("Acquire failed: %x\n", hr).c_str());
-			
-		// shutdown and reinitialize
-		Close();
-		auto err = Initialize();
-		if (err != "") {
-			throw std::runtime_error(err);
-		}
-
-		// see you next time
+	if (hr == DXGI_ERROR_ACCESS_LOST) {
+		Reset();
 		return;
 	}
+	else if (FAILED(hr)) {
+		throw std::runtime_error(tsf::fmt("AcquireNextFrame error, code: %d\n", hr));
+	}
 
-	// yeah, I acquire it
 	HaveFrameLock = true;
 
-	ID3D11Texture2D* gpuTex = nullptr;
-	hr = deskRes->QueryInterface(__uuidof(ID3D11Texture2D), (void**) &gpuTex);
-	deskRes->Release();
-	deskRes = nullptr;
-	if (FAILED(hr)) {
-		throw std::runtime_error(tsf::fmt("IDXGIResource.QueryInterface error, code: %d\n", hr));
+	DXGI_OUTDUPL_DESC deskDuplDesc;
+	DeskDupl->GetDesc(&deskDuplDesc);
+	if (deskDuplDesc.ModeDesc.Width != 1920 || deskDuplDesc.ModeDesc.Height != 1080)
+		throw std::runtime_error("NotImplementError: Currently only support server resolution 1920x1080");
+	if (Latest.Width != deskDuplDesc.ModeDesc.Width || Latest.Height != deskDuplDesc.ModeDesc.Height) {
+		Latest.Width = deskDuplDesc.ModeDesc.Width;
+		Latest.Height = deskDuplDesc.ModeDesc.Height;
+		Latest.Buf.resize((long long)Latest.Width * Latest.Height * 4);
+
+		OutputDebugStringA(tsf::fmt("Resize Latest Bitmap to (%d, %d)\n", Latest.Width, Latest.Height).c_str());
 	}
 
-	D3D11_TEXTURE2D_DESC desc;
-	gpuTex->GetDesc(&desc);
-	desc.CPUAccessFlags     = D3D11_CPU_ACCESS_WRITE | D3D11_CPU_ACCESS_READ;
-	desc.Usage              = D3D11_USAGE_STAGING;
-	desc.BindFlags          = 0;
-	desc.MiscFlags          = 0; // D3D11_RESOURCE_MISC_GDI_COMPATIBLE ?
-	ID3D11Texture2D* cpuTex = nullptr;
-	hr                      = D3DDevice->CreateTexture2D(&desc, nullptr, &cpuTex);
-	if (SUCCEEDED(hr)) {
-		D3DDeviceContext->CopyResource(cpuTex, gpuTex);
-	} else {
-		throw std::runtime_error(tsf::fmt("ID3D11Device.CreateTexture2D error, code: %d\n", hr));
-	}
-	gpuTex->Release();
+	// the desktop image was updated
+	if (frameInfo.LastPresentTime.QuadPart != 0) {
+		// image already in system memory
+		if (deskDuplDesc.DesktopImageInSystemMemory) {
+			DXGI_MAPPED_RECT mappedRect;
+			DeskDupl->MapDesktopSurface(&mappedRect);
+			if (hr == DXGI_ERROR_ACCESS_LOST) {
+				Reset();
+				return;
+			}
+			else if (FAILED(hr)) {
+				throw std::runtime_error(tsf::fmt("MapDesktopSurface error, code: %d\n", hr));
+			}
 
-	D3D11_MAPPED_SUBRESOURCE sr;
-	hr = D3DDeviceContext->Map(cpuTex, 0, D3D11_MAP_READ, 0, &sr);
-	if (SUCCEEDED(hr)) {
-		if (Latest.Width != desc.Width || Latest.Height != desc.Height) {
-			OutputDebugStringA(tsf::fmt("resize to (%d, %d)\n", desc.Width, desc.Height).c_str());
-			if(desc.Width != 1920 || desc.Height != 1080)
-				throw std::runtime_error(tsf::fmt("NotImplementError: Currently only support server resolution 1920x1080", hr));
-			
-			Latest.Width  = desc.Width;
-			Latest.Height = desc.Height;
-			Latest.Buf.resize(desc.Width * desc.Height * 4);
+			for (int y = 0; y < Latest.Height; y++)
+				memcpy(Latest.Buf.data() + (long long)y * Latest.Width * 4, (uint8_t*)mappedRect.pBits + (long long)mappedRect.Pitch * y, (long long)Latest.Width * 4);
+
+			DeskDupl->UnMapDesktopSurface();
+			if (FAILED(hr)) {
+				throw std::runtime_error(tsf::fmt("MapDesktopSurface error, code: %d\n", hr));
+			}
+
+			deskRes->Release();
 		}
-		for (int y = 0; y < (int) desc.Height; y++)
-			memcpy(Latest.Buf.data() + y * desc.Width * 4, (uint8_t*) sr.pData + sr.RowPitch * y, desc.Width * 4);
-		D3DDeviceContext->Unmap(cpuTex, 0);
-	} else {
-		throw std::runtime_error(tsf::fmt("ID3D11DeviceContext.Map error, code: %d\n", hr));
+		else {
+			ID3D11Texture2D* gpuTex = nullptr;
+			hr = deskRes->QueryInterface(__uuidof(ID3D11Texture2D), (void**)& gpuTex);
+			deskRes->Release();
+			deskRes = nullptr;
+			if (FAILED(hr)) {
+				throw std::runtime_error(tsf::fmt("IDXGIResource.QueryInterface error, code: %d\n", hr));
+			}
+
+			D3D11_TEXTURE2D_DESC desc;
+			gpuTex->GetDesc(&desc);
+			desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+			desc.Usage = D3D11_USAGE_STAGING;
+			desc.BindFlags = 0;
+			desc.MiscFlags = 0;
+			ID3D11Texture2D* cpuTex = nullptr;
+			hr = D3DDevice->CreateTexture2D(&desc, nullptr, &cpuTex);
+			if (SUCCEEDED(hr)) {
+				D3DDeviceContext->CopyResource(cpuTex, gpuTex);
+			}
+			else {
+				throw std::runtime_error(tsf::fmt("ID3D11Device.CreateTexture2D error, code: %d\n", hr));
+			}
+			gpuTex->Release();
+
+			D3D11_MAPPED_SUBRESOURCE sr;
+			hr = D3DDeviceContext->Map(cpuTex, 0, D3D11_MAP_READ, 0, &sr);
+			if (SUCCEEDED(hr)) {
+				for (int y = 0; y < (int)desc.Height; y++)
+					memcpy(Latest.Buf.data() + (long long)y * Latest.Width * 4, (uint8_t*)sr.pData + (long long)sr.RowPitch * y, (long long)Latest.Width * 4);
+				D3DDeviceContext->Unmap(cpuTex, 0);
+			}
+			else {
+				throw std::runtime_error(tsf::fmt("ID3D11DeviceContext.Map error, code: %d\n", hr));
+			}
+			cpuTex->Release();
+		}
 	}
-	cpuTex->Release();
 
 	SendNBytes(Latest.Buf.data(), (int)Latest.Buf.size());
 }
