@@ -73,8 +73,6 @@ Error WinDesktopDup::Initialize() {
 		return tsf::fmt("dxgiAdapter->EnumOutputs failed: %v", hr);
 	}
 
-	dxgiOutput->GetDesc(&OutputDesc);
-
 	// QI for Output 1
 	IDXGIOutput1* dxgiOutput1 = nullptr;
 	hr = dxgiOutput->QueryInterface(__uuidof(dxgiOutput1), (void**) &dxgiOutput1);
@@ -181,6 +179,9 @@ void WinDesktopDup::CaptureNext() {
 	if (SUCCEEDED(hr)) {
 		if (Latest.Width != desc.Width || Latest.Height != desc.Height) {
 			OutputDebugStringA(tsf::fmt("resize to (%d, %d)\n", desc.Width, desc.Height).c_str());
+			if(desc.Width != 1920 || desc.Height != 1080)
+				throw std::runtime_error(tsf::fmt("NotImplementError: Currently only support server resolution 1920x1080", hr));
+			
 			Latest.Width  = desc.Width;
 			Latest.Height = desc.Height;
 			Latest.Buf.resize(desc.Width * desc.Height * 4);

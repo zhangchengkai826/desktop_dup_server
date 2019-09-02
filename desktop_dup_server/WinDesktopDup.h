@@ -26,7 +26,6 @@ private:
 	ID3D11Device*           D3DDevice        = nullptr;
 	ID3D11DeviceContext*    D3DDeviceContext = nullptr;
 	IDXGIOutputDuplication* DeskDupl         = nullptr;
-	DXGI_OUTPUT_DESC        OutputDesc;
 	bool                    HaveFrameLock = false;
 };
 
