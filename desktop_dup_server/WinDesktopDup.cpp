@@ -1,6 +1,9 @@
 #include "stdafx.h"
 #include "WinDesktopDup.h"
 
+UINT serverWidth = 2736;
+UINT serverHeight = 1824;
+
 WinDesktopDup::~WinDesktopDup() {
 	Close();
 }
@@ -161,8 +164,10 @@ void WinDesktopDup::CaptureNext() {
 
 	DXGI_OUTDUPL_DESC deskDuplDesc;
 	DeskDupl->GetDesc(&deskDuplDesc);
-	if (deskDuplDesc.ModeDesc.Width != 1920 || deskDuplDesc.ModeDesc.Height != 1080)
-		throw std::runtime_error("NotImplementError: Currently only support server resolution 1920x1080");
+	if (deskDuplDesc.ModeDesc.Width != serverWidth || deskDuplDesc.ModeDesc.Height != serverHeight) {
+		OutputDebugStringA(tsf::fmt("NotImplementError: Currently only support server resolution %dx%d\n", serverWidth, serverHeight).c_str());
+		throw std::runtime_error("");
+	}
 	if (Latest.Width != deskDuplDesc.ModeDesc.Width || Latest.Height != deskDuplDesc.ModeDesc.Height) {
 		Latest.Width = deskDuplDesc.ModeDesc.Width;
 		Latest.Height = deskDuplDesc.ModeDesc.Height;
