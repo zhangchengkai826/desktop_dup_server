@@ -1,8 +1,8 @@
 #include "stdafx.h"
 #include "WinDesktopDup.h"
 
-UINT serverWidth = 2736;
-UINT serverHeight = 1824;
+UINT serverWidth = 1920;
+UINT serverHeight = 1080;
 
 WinDesktopDup::~WinDesktopDup() {
 	Close();
